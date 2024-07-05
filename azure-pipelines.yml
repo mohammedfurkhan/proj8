@@ -1,0 +1,60 @@
+trigger:
+  - main
+
+pool:
+  vmImage: "ubuntu-latest"
+
+variables:
+  imageName: "my-node-app"
+
+stages:
+  - stage: Build
+    jobs:
+      - job: Build
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: "14.x"
+            displayName: "Install Node.js"
+
+          - script: |
+              npm install
+            displayName: "Install dependencies"
+
+          - task: Docker@2
+            inputs:
+              containerRegistry: "conregproject"
+              repository: "$(imageName)"
+              command: "buildAndPush"
+              Dockerfile: "**/Dockerfile"
+              tags: |
+                $(Build.BuildId)
+            displayName: "Build and push Docker image"
+
+  - stage: Deploy
+    dependsOn: Build
+    jobs:
+      - deployment: DeployToAKS
+        displayName: "Deploy to AKS"
+        environment: "Development"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - script: |
+                    echo "Listing files in the repository"
+                    ls -R
+                    echo "Current directory:"
+                    pwd
+                  displayName: "List files and directories"
+
+                - task: KubernetesManifest@0
+                  inputs:
+                    kubernetesServiceConnection: "kubeaks"
+                    namespace: "default"
+                    manifests: |
+                      **/manifest/Deployment.yaml
+                      **/manifest/Service.yaml
+                    containers: |
+                      $(imageName) $(containerRegistry)/$(imageName):$(Build.BuildId)
+                  displayName: "Deploy to AKS"
